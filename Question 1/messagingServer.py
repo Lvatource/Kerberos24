@@ -6,7 +6,8 @@ This file includes the main() function for the messaging server, initializing it
 import selectors
 import socket
 import constants
-from interact import parse_request_header, get_request_payload
+import requests
+from interact import parse_request_header
 import opcodes
 from messsagingServerUtil import receive_sym_key, receive_message, answer_invalid_opcode
 
@@ -35,16 +36,24 @@ def read(conn, mask):
     :param conn: the connected sock
     :param mask: the mask
     """
-    data = conn.recv(constants.MAX_PACKET_LENGTH)
-    if data:
-        client_id, version, opcode, payload_size = parse_request_header(data)
-        payload = get_request_payload(data)
-        if opcode == opcodes.SEND_SYM_KEY:
-            receive_sym_key(payload, conn, client_id, tickets)
-        elif opcode == opcodes.SEND_MESSAGE:
-            receive_message(payload, conn, client_id, tickets)
+    header = conn.recv(requests.HEADER_LENGTH)
+    # First we get the header,
+    if header:
+        client_id, version, opcode, payload_size = parse_request_header(header)
+        payload = conn.recv(payload_size)
+        # Then, we read the rest of the packet- the payload
+        if payload:
+            if opcode == opcodes.SEND_SYM_KEY:
+                receive_sym_key(payload, conn, client_id, tickets)
+            elif opcode == opcodes.SEND_MESSAGE:
+                receive_message(payload, conn, client_id, tickets)
+            else:
+                answer_invalid_opcode(opcode, conn)
         else:
-            answer_invalid_opcode(opcode, conn)
+            print("[!] WARNING: Packet payload is missing")
+            print("[*] Connection", conn, "is over")
+            sel.unregister(conn)
+            conn.close()
     else:
         print("[*] Connection", conn, "is over")
         sel.unregister(conn)

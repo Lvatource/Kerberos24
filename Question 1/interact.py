@@ -155,33 +155,29 @@ def create_packet(client_id, version: int, opcode: int, payload_size: int, *args
     return packet
 
 
-def parse_request_header(packet: bytes) -> (str, int, int, int):
+def parse_request_header(header: bytes) -> (str, int, int, int):
     """
     parse_request_header(): parses a request packet header and returns the separate fields.
 
-    :param packet: the packet
+    :param header: the header
     :return: the separate header fields
     """
-    client_id, version, opcode, payload_size = unpack(requests.HEADER_FORMAT, get_request_header(packet))
+    client_id, version, opcode, payload_size = unpack(requests.HEADER_FORMAT, header)
     return client_id.hex(), version, opcode, payload_size
 
 
-def parse_answer_header(packet: bytes) -> (int, int, int):
+def parse_answer_header(header: bytes) -> (int, int, int):
     """
     parse_answer_header(): parses an answer packet header and returns the separate fields.
 
-    :param packet: the packet
+    :param header: the packet
     :return: the separate header fields
     """
-    version, opcode, payload_size = unpack(answers.HEADER_FORMAT, get_answer_header(packet))
-    if opcode == opcodes.SERVER_ERROR:
-        print("[X] ERROR: Server responded with an error")
-        exit(1)
-        # In case of an error from the server, the client terminates
+    version, opcode, payload_size = unpack(answers.HEADER_FORMAT, header)
     return version, opcode, payload_size
 
 
-def parse_payload(opcode: int, payload: bytes):
+def parse_payload(opcode: int, payload: bytes) -> bytes:
     """
     parse_payload(): parses a packet payload and returns the fields according to the opcode.
 
@@ -204,49 +200,9 @@ def parse_payload(opcode: int, payload: bytes):
     elif opcode == opcodes.REGISTER_CLIENT:
         parsed_payload = unpack("<255s255s", payload)
     else:
-        print("[X] ERROR: Opcode " + str(opcode) + " is not valid, terminating")
-        exit(1)
+        print("[X] ERROR: Opcode " + str(opcode) + " is not valid")
+        parsed_payload = None
     return parsed_payload
-
-
-def get_request_header(packet: bytes) -> bytes:
-    """
-    get_request_header(): get the header portion from a request packet.
-
-    :param packet: the packet
-    :return: the header portion
-    """
-    return packet[:requests.HEADER_LENGTH]
-
-
-def get_answer_header(packet: bytes) -> bytes:
-    """
-    get_answer_header(): get the header portion from an answer packet.
-
-    :param packet: the packet
-    :return: the header portion
-    """
-    return packet[:answers.HEADER_LENGTH]
-
-
-def get_request_payload(packet: bytes) -> bytes:
-    """
-    get_request_payload(): get the payload portion from a request packet.
-
-    :param packet: the packet
-    :return: the payload portion
-    """
-    return packet[requests.HEADER_LENGTH:]
-
-
-def get_answer_payload(packet: bytes) -> bytes:
-    """
-    get_answer_payload(): get the payload portion from an answer packet.
-
-    :param packet: the packet
-    :return: the payload portion
-    """
-    return packet[answers.HEADER_LENGTH:]
 
 
 def get_ticket_from_payload(packet: bytes) -> bytes:
@@ -286,7 +242,7 @@ def get_message_size_and_iv(payload: bytes) -> bytes:
     :param payload: the payload
     :return: the size and iv portion
     """
-    return payload[:constants.MESSAGE_SIZE_FIELD_SIZE+constants.IV_FIELD_SIZE]
+    return payload[:constants.MESSAGE_SIZE_FIELD_SIZE + constants.IV_FIELD_SIZE]
 
 
 def get_encrypted_message(payload: bytes, size: int) -> bytes:

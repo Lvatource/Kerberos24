@@ -5,13 +5,14 @@ A collection of all the different actions the client is tasked with doing- regis
 sending the symmetrical key and sending messages.
 """
 import socket
+
+import answers
 import constants
 import opcodes
 from crypto import generate_random_iv, encrypt_aes_cbc, generate_random_nonce, get_password_SHA256_digest, \
     decrypt_aes_cbc, generate_authenticator
 from file import validate_password, validate_username, get_null_terminated_string
-from interact import create_packet, parse_answer_header, end_connection, parse_payload, get_answer_payload, \
-    get_ticket_from_payload
+from interact import create_packet, parse_answer_header, end_connection, parse_payload, get_ticket_from_payload
 
 CLIENT_VERSION = 24
 
@@ -35,8 +36,8 @@ def send_message(shared_key: bytes, client_id: str, sock: socket.socket):
         create_packet(client_id, CLIENT_VERSION, opcodes.SEND_MESSAGE, constants.MESSAGE_SIZE_FIELD_SIZE + len(msg_iv) + msg_size, msg_size,
                       msg_iv, encrypted_message))
     # Send the message to the message server
-    packet = sock.recv(constants.MAX_PACKET_LENGTH)
-    version, opcode, payload_size = parse_answer_header(packet)
+    header = sock.recv(answers.HEADER_LENGTH)
+    version, opcode, payload_size = parse_answer_header(header)
     if opcode == opcodes.MESSAGE_ACK:
         print("[*] The printing has been completed successfully")
     elif opcode == opcodes.SERVER_ERROR:
@@ -66,14 +67,14 @@ def log_in() -> str:
         username = input("[#] Enter your username: ")
         while not validate_username(username):
             print("[!] WARNING: Entered username is invalid- the username must be up to", constants.MAX_USERNAME_LENGTH,
-                  " characters and can't contain \':\', please try again")
+                  " characters (at least 1 character) and can't contain \':\', please try again")
             username = input("[#] Enter your new username: ")
         # Make sure the username is not too long and that it doesn't include ":"
         username += '\0'
         password = input("[#] Enter your password: ")
         while not validate_password(password):
             print("[!] WARNING: Entered password is invalid- the password must be up to", constants.MAX_PASSWORD_LENGTH,
-                  "characters, please try again")
+                  "characters (at least 1 character), please try again")
             password = input("[#] Enter your new password: ")
         # Make sure the password is not too long
         password += '\0'
@@ -94,11 +95,12 @@ def log_in() -> str:
                                        opcodes.REGISTER_CLIENT, constants.CLIENT_REGISTRATION_PAYLOAD_SIZE,
                                        username, password))
             # Registration packet sent
-            packet = sock.recv(constants.MAX_PACKET_LENGTH)
-            version, opcode, payload_size = parse_answer_header(packet)
+            header = sock.recv(answers.HEADER_LENGTH)
+            version, opcode, payload_size = parse_answer_header(header)
+            payload = sock.recv(payload_size)
             if opcode == opcodes.REGISTRATION_SUCCESSFUL:
                 print("[*] Registration successful, saving data into me.info for later use")
-                uid = parse_payload(opcode, get_answer_payload(packet))
+                uid = parse_payload(opcode, payload)
                 f = open('me.info', 'a')
                 f.write(get_null_terminated_string(username) + '\n')
                 f.write(uid)
@@ -154,24 +156,26 @@ def establish_connection(client_id: str) -> (bytes, socket.socket):
         nonce = generate_random_nonce()
         sock.sendall(create_packet(client_id, CLIENT_VERSION, opcodes.REQUEST_SYM_KEY, len(constants.SINGLE_MESSAGE_SERVER_ID) + len(nonce),
                                    constants.SINGLE_MESSAGE_SERVER_ID, nonce))
-        packet = sock.recv(constants.MAX_PACKET_LENGTH)
+        header = sock.recv(answers.HEADER_LENGTH)
+        version, opcode, payload_size = parse_answer_header(header)
+        payload = sock.recv(payload_size)
         end_connection(sock)
         # Request a symmetrical key (and a ticket) from the authentication server
     password = input("[#] Enter your password: ")
     # Ask for user password in order to decrypt the encrypted key field
     user_key = get_password_SHA256_digest(password).digest()
-    version, opcode, payload_size = parse_answer_header(packet)
-    payload = get_answer_payload(packet)
     encrypted_key_iv, encrypted_nonce, encrypted_shared_key = parse_payload(opcode, payload)
     received_nonce = decrypt_aes_cbc(encrypted_nonce, user_key, encrypted_key_iv)
-    shared_key = decrypt_aes_cbc(encrypted_shared_key, user_key, encrypted_key_iv)
-    ticket = get_ticket_from_payload(packet)
     if nonce != received_nonce:
         print("[X] ERROR: Nonce has been compromised, wrong password / a reply attack is possible. Terminating")
-        end_connection(sock)
         exit(1)
     # If the nonce was changed, terminate
     print("[*] Nonce has been confirmed, continuing...")
+    shared_key = decrypt_aes_cbc(encrypted_shared_key, user_key, encrypted_key_iv)
+    if shared_key is None:
+        print("[X] Error: Decryption failed for shared key, terminating")
+        exit(1)
+    ticket = get_ticket_from_payload(payload)
     client_id_bytes = bytes.fromhex(client_id)
     server_id_bytes = bytes.fromhex(constants.SINGLE_MESSAGE_SERVER_ID)
     authenticator = generate_authenticator(version, client_id_bytes, server_id_bytes, shared_key)
@@ -182,8 +186,8 @@ def establish_connection(client_id: str) -> (bytes, socket.socket):
         create_packet(client_id, CLIENT_VERSION, opcodes.SEND_SYM_KEY, len(authenticator) + len(ticket),
                       authenticator, ticket))
     # Send the ticket and the authenticator to the message server
-    packet = sock.recv(constants.MAX_PACKET_LENGTH)
-    version, opcode, payload_size = parse_answer_header(packet)
+    header = sock.recv(answers.HEADER_LENGTH)
+    version, opcode, payload_size = parse_answer_header(header)
     if opcode == opcodes.SERVER_ERROR:
         print("[X] ERROR: Message server responded with an error, terminating")
         end_connection(sock)

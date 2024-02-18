@@ -4,6 +4,7 @@ crypto.py
 A collection of functions regarding the cryptography side of the project, and the generation of cryptographical "structures"
 such as the ticket, the authenticator and the encrypted key field.
 """
+import binascii
 from typing import Union
 from Crypto.Cipher import AES
 from Crypto.Hash import SHA256
@@ -86,6 +87,9 @@ def generate_ticket(version: int, client_id: bytes, server_id: bytes, shared_key
         return None
     # In case the file doesn't exist, we return None in order to signal to the calling function something went wrong
     msg_key = b64_key_decrypt(b64_msg_key)
+    if msg_key is None:
+        print("[!] WARNING: Key in msg.info is incompatible")
+        return None
     msg_iv = generate_random_iv()
     encrypted_shared_key = encrypt_aes_cbc(shared_key, msg_key, msg_iv)
     now = int(time.time())
@@ -107,7 +111,11 @@ def b64_key_decrypt(key_str: str) -> bytes:
     :return: the original bytes
     """
     key = bytes.fromhex(key_str)
-    decoded_key = base64.b64decode(key)
+    try:
+        decoded_key = base64.b64decode(key)
+    except binascii.Error:
+        print("[!] WARNING: Something went wrong with the decryption")
+        decoded_key = None
     return decoded_key
 
 
@@ -168,7 +176,6 @@ def decrypt_aes_cbc(ciphertext: bytes, key: bytes, iv: bytes) -> bytes:
     try:
         data = unpad(cipher.decrypt(ciphertext), AES.block_size)
     except ValueError:
-        print("[!] Password is wrong. Try again or create a new account")
-        # If the decryption doesn't work, the given password must be wrong.
-        exit(1)
+        print("[!] WARNING: Something went wrong with the decryption")
+        data = None
     return data

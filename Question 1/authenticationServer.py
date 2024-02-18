@@ -7,9 +7,10 @@ import selectors
 import socket
 import constants
 import opcodes
+import requests
 from authenticationServerUtil import commence_registration, send_sym_key, answer_invalid_opcode
 from file import update_client
-from interact import parse_request_header, get_request_payload
+from interact import parse_request_header
 
 sel = selectors.DefaultSelector()
 
@@ -34,18 +35,26 @@ def read(conn, mask):
     :param conn: the connected sock
     :param mask: the mask
     """
-    data = conn.recv(constants.MAX_PACKET_LENGTH)
-    if data:
-        client_id, version, opcode, payload_size = parse_request_header(data)
-        payload = get_request_payload(data)
+    header = conn.recv(requests.HEADER_LENGTH)
+    # First we get the header,
+    if header:
+        client_id, version, opcode, payload_size = parse_request_header(header)
+        payload = conn.recv(payload_size)
+        # Then, we read the rest of the packet- the payload
         update_client(client_id)
         # Update the client last seen attribute
-        if opcode == opcodes.REGISTER_CLIENT:
-            commence_registration(payload, conn)
-        elif opcode == opcodes.REQUEST_SYM_KEY:
-            send_sym_key(payload, conn, client_id)
+        if payload:
+            if opcode == opcodes.REGISTER_CLIENT:
+                commence_registration(payload, conn)
+            elif opcode == opcodes.REQUEST_SYM_KEY:
+                send_sym_key(payload, conn, client_id)
+            else:
+                answer_invalid_opcode(opcode, conn)
         else:
-            answer_invalid_opcode(opcode, conn)
+            print("[!] WARNING: Packet payload is missing")
+            print("[*] Connection", conn, "is over")
+            sel.unregister(conn)
+            conn.close()
     else:
         print("[*] Connection ", conn, " is over")
         sel.unregister(conn)

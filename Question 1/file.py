@@ -29,22 +29,22 @@ def get_user_key(client_id: str) -> Union[bytes, None]:
 
 def validate_username(username: str) -> bool:
     """
-    validate_username(): makes sure a username is not too long and doesn't contain ':'.
+    validate_username(): makes sure a username is not too long and not too short, and also that doesn't contain ':'.
 
     :param username: the username in question
     :return: True if it satisfies the conditions, False otherwise
     """
-    return (len(username) <= constants.MAX_USERNAME_LENGTH) and (username.find(":") == -1)
+    return (len(username) <= constants.MAX_USERNAME_LENGTH) and len(username) >= 1 and (username.find(":") == -1)
 
 
 def validate_password(password: str) -> bool:
     """
-    validate_password(): makes sure a password is not too long.
+    validate_password(): makes sure a password is not too long and not too short.
 
     :param password: the password in question
     :return: True if it satisfies the condition, False otherwise
     """
-    return len(password) <= constants.MAX_PASSWORD_LENGTH
+    return constants.MAX_PASSWORD_LENGTH >= len(password) >= 1
 
 
 def get_null_terminated_string(string: str) -> str:

@@ -14,7 +14,7 @@ SERVER_VERSION = 24
 
 def receive_sym_key(payload: bytes, sock, client_id: str, tickets: dict):
     """
-    receive_sym_key(): Receives a ticket and authenticator, check their validity and stores.
+    receive_sym_key(): Receives a ticket and authenticator, checks their validity and stores.
 
     :param payload: the payload containing the ticket and authenticator
     :param sock: the connected socket
@@ -35,22 +35,39 @@ def receive_sym_key(payload: bytes, sock, client_id: str, tickets: dict):
         exit(1)
         # Acquire the server key from the msg.info file
     msg_key = b64_key_decrypt(base64_sym_key)
+    if msg_key is None:
+        sock.sendall(create_packet(None, SERVER_VERSION, opcodes.SERVER_ERROR, 0))
+        return
+        # In all the following conditions, we simply make sure the decryption has been done successfully
     authenticator, ticket = parse_payload(opcodes.SEND_SYM_KEY, payload)
     shared_key = decrypt_aes_cbc(ticket[5], msg_key, ticket[4])
+    if shared_key is None:
+        sock.sendall(create_packet(None, SERVER_VERSION, opcodes.SERVER_ERROR, 0))
+        return
     expiration_bytes = decrypt_aes_cbc(ticket[6], msg_key, ticket[4])
+    if expiration_bytes is None:
+        sock.sendall(create_packet(None, SERVER_VERSION, opcodes.SERVER_ERROR, 0))
+        return
     expiration_time = int.from_bytes(expiration_bytes, byteorder="little")
     if is_expired(expiration_time):
         print("[X] ERROR: Expiration time for the ticket has exceeded, responding with an error")
         sock.sendall(create_packet(None, SERVER_VERSION, opcodes.SERVER_ERROR, 0))
+        return
         # Check if the ticket is already expired
     else:
         decrypted_version = unpack("<B", decrypt_aes_cbc(authenticator[1], shared_key, authenticator[0]))[0]
         decrypted_client_id = decrypt_aes_cbc(authenticator[2], shared_key, authenticator[0])
+        if decrypted_client_id is None:
+            sock.sendall(create_packet(None, SERVER_VERSION, opcodes.SERVER_ERROR, 0))
+            return
         decrypted_server_id = decrypt_aes_cbc(authenticator[3], shared_key, authenticator[0])
+        if decrypted_server_id is None:
+            sock.sendall(create_packet(None, SERVER_VERSION, opcodes.SERVER_ERROR, 0))
+            return
         if decrypted_version != ticket[0] or decrypted_client_id != ticket[1] or decrypted_server_id != ticket[
             2] or decrypted_client_id != bytes.fromhex(client_id) or decrypted_server_id != bytes.fromhex(
             server_id):
-            print("[X] Data discrepancy detected, responding with an error")
+            print("[X] ERROR: Data discrepancy detected, responding with an error")
             sock.sendall(create_packet(None, SERVER_VERSION, opcodes.SERVER_ERROR, 0))
             # Check the integrity of the data
         else:
@@ -68,7 +85,7 @@ def save_ticket(tickets: dict, client_id: str, shared_key: bytes, expiration_tim
     :param sock: the connected socket
     """
     tickets[client_id] = (shared_key, expiration_time)
-    print("[*] User " + client_id + "'s ticket has been added to RAM")
+    print("[*] User " + client_id + "'s ticket has been saved to RAM")
     sock.sendall(create_packet(None, SERVER_VERSION, opcodes.KEY_ACK, 0))
     print("[*] Shared symmetrical key received successfully")
 
@@ -100,6 +117,9 @@ def receive_message(payload: bytes, sock, client_id: str, tickets: dict):
             encrypted_msg = unpack('<{}s'.format(len(encrypted_msg)), encrypted_msg)[0]
             decrypted_msg = decrypt_aes_cbc(encrypted_msg, get_client_shared_key(client_id, tickets), msg_iv).decode(
                 "utf-8")
+            if decrypted_msg is None:
+                sock.sendall(create_packet(None, SERVER_VERSION, opcodes.SERVER_ERROR, 0))
+                return
             print("[@] Client", client_id, "says:", decrypted_msg)
             # Print the received message to the console
             sock.sendall(create_packet(None, SERVER_VERSION, opcodes.MESSAGE_ACK, 0))
